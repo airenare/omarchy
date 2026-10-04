@@ -52,3 +52,10 @@ if rg -q 'omarchy-shell' "$ROOT/bin/omarchy-toggle-idle"; then
 fi
 
 pass "Stay Awake toggle persists state without reentrant shell IPC"
+
+cancel_block=$(awk '/function cancelIdleCycle/,/^  }$/' "$ROOT/shell/plugins/services/idle/Service.qml")
+if ! grep -q "pkill -f '\[o\]rg.omarchy.screensaver'" <<<"$cancel_block"; then
+  fail "cancelIdleCycle closes a launched screensaver window"
+fi
+
+pass "cancelIdleCycle closes a launched screensaver window"

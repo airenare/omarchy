@@ -105,6 +105,11 @@ Item {
     lockTimer.stop()
     screensaverLaunchGraceTimer.stop()
 
+    // The screensaver is a separate terminal process, so cancelling the cycle
+    // does not close it on its own. Close it here, or it stays up until the
+    // next keypress even though nothing is left to lock the session.
+    if (root.screensaverStartedThisCycle) runProcess(screensaverCloseProcess, "screensaver-close", "pkill -f '[o]rg.omarchy.screensaver' || true")
+
     if (root.idledThisCycle) runProcess(wakeProcess, "wake", "omarchy-system-wake")
 
     root.idledThisCycle = false
@@ -290,6 +295,10 @@ Item {
   Process {
     id: screensaverProcess
     onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "screensaver exitCode=" + exitCode + " status=" + exitStatus) }
+  }
+  Process {
+    id: screensaverCloseProcess
+    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "screensaver-close exitCode=" + exitCode + " status=" + exitStatus) }
   }
   Process {
     id: lockProcess
