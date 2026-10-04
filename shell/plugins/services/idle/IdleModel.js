@@ -83,6 +83,12 @@ function addressesToClose(owned) {
   return addresses
 }
 
+// A cancelled launch opens one window per screen. Only that many late windows
+// can belong to it; anything beyond that was started by someone else.
+function lateWindowBudget(screenCount, ownedCount) {
+  return Math.max(0, (screenCount || 0) - (ownedCount || 0))
+}
+
 // Closes by address rather than by pattern, so only the windows this cycle
 // opened are affected.
 function closeWindowsCommand(addresses) {
@@ -104,6 +110,7 @@ if (typeof module !== "undefined") {
     ownedWindowsAfterOpen: ownedWindowsAfterOpen,
     ownedWindowsAfterClose: ownedWindowsAfterClose,
     addressesToClose: addressesToClose,
-    closeWindowsCommand: closeWindowsCommand
+    closeWindowsCommand: closeWindowsCommand,
+    lateWindowBudget: lateWindowBudget
   }
 }

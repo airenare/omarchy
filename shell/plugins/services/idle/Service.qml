@@ -42,6 +42,8 @@ Item {
   // Set when a cycle is cancelled after its launch started. Any screensaver
   // window that opens later belongs to that launch and is closed on arrival.
   property bool closeLateScreensaverWindows: false
+  // How many late windows the cancelled launch can still open, one per screen.
+  property int lateScreensaverWindowBudget: 0
   property var pendingScreensaverCloses: []
 
   function secondsFromConfig(value, fallback) {
@@ -99,6 +101,7 @@ Item {
     root.screensaverStartedThisCycle = false
     // A late close from a previous cycle must not catch this cycle's screensaver.
     root.closeLateScreensaverWindows = false
+    root.lateScreensaverWindowBudget = 0
     lateScreensaverWindowTimer.stop()
     resetScreensaverWindows()
 
@@ -118,11 +121,13 @@ Item {
     // The screensaver is a separate terminal process, so cancelling the cycle
     // does not close it on its own. Close the windows this cycle opened, and
     // close any that are still on their way if the launch has begun.
+    var owned = IdleModel.addressesToClose(root.ownedScreensaverWindows)
     if (root.screensaverStartedThisCycle) {
       root.closeLateScreensaverWindows = true
+      root.lateScreensaverWindowBudget = IdleModel.lateWindowBudget(Quickshell.screens.length, owned.length)
       lateScreensaverWindowTimer.restart()
     }
-    closeScreensaverWindows(IdleModel.addressesToClose(root.ownedScreensaverWindows))
+    closeScreensaverWindows(owned)
     root.ownedScreensaverWindows = ({})
 
     if (root.idledThisCycle) runProcess(wakeProcess, "wake", "omarchy-system-wake")
@@ -163,8 +168,12 @@ Item {
     screensaverLaunchGraceTimer.stop()
 
     if (root.closeLateScreensaverWindows) {
-      root.ownedScreensaverWindows = IdleModel.ownedWindowsAfterClose(root.ownedScreensaverWindows, address)
-      closeScreensaverWindows([IdleModel.normalizeWindowAddress(address)])
+      // Only windows the cancelled launch is still due to open are ours; a
+      // screensaver started by hand after the launch is left alone.
+      if (root.lateScreensaverWindowBudget > 0) {
+        root.lateScreensaverWindowBudget -= 1
+        closeScreensaverWindows([IdleModel.normalizeWindowAddress(address)])
+      }
       return
     }
 
@@ -238,6 +247,8 @@ Item {
       screensaverDelay: root.screensaverDelaySeconds,
       lockDelay: root.lockDelaySeconds,
       screensaverWindows: root.screensaverWindowCount,
+      ownedScreensaverWindows: IdleModel.addressesToClose(root.ownedScreensaverWindows),
+      closeLateScreensaverWindows: root.closeLateScreensaverWindows,
       timers: {
         screensaver: screensaverTimer.running,
         lock: lockTimer.running,
@@ -326,6 +337,7 @@ Item {
     onTriggered: {
       if (screensaverProcess.running) return
       root.closeLateScreensaverWindows = false
+      root.lateScreensaverWindowBudget = 0
     }
   }
 

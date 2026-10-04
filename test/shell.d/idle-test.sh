@@ -77,6 +77,12 @@ assertEqual(
 )
 assertEqual(idle.closeWindowsCommand([]), 'true', 'idle close command is a no-op with no windows')
 assertEqual(idle.closeWindowsCommand(['nope;x']), 'true', 'idle never builds a close command from a non-hex address')
+
+// A cancel during launch can only claim windows the launch has yet to open.
+assertEqual(idle.lateWindowBudget(2, 0), 2, 'idle allows one late window per screen when none opened')
+assertEqual(idle.lateWindowBudget(2, 1), 1, 'idle allows only the remaining late windows')
+assertEqual(idle.lateWindowBudget(1, 1), 0, 'idle allows no late window once every screen has one')
+assertEqual(idle.lateWindowBudget(1, 3), 0, 'idle never allows a negative budget')
 JS
 
 pass "idle screensaver ownership and close-by-address"
