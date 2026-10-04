@@ -164,6 +164,9 @@ Item {
   }
 
   function handleScreensaverWindowOpened(address) {
+    // A repeated open event for a window we already track is not a new window,
+    // so it must not spend a late-close slot or be counted twice.
+    if (root.screensaverWindows[address]) return
     setScreensaverWindow(address, true)
     screensaverLaunchGraceTimer.stop()
 
