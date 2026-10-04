@@ -37,6 +37,12 @@ Item {
   property string lastEventAt: ""
   property var screensaverWindows: ({})
   property int screensaverWindowCount: 0
+  // Screensaver windows this cycle opened, keyed by normalized address.
+  property var ownedScreensaverWindows: ({})
+  // Set when a cycle is cancelled after its launch started. Any screensaver
+  // window that opens later belongs to that launch and is closed on arrival.
+  property bool closeLateScreensaverWindows: false
+  property var pendingScreensaverCloses: []
 
   function secondsFromConfig(value, fallback) {
     return IdleModel.secondsFromConfig(value, fallback)
@@ -77,6 +83,7 @@ Item {
     screensaverLaunchGraceTimer.stop()
     root.idledThisCycle = false
     root.screensaverStartedThisCycle = false
+    root.ownedScreensaverWindows = ({})
     resetScreensaverWindows()
     runProcess(lockProcess, "lock", "omarchy-system-lock")
   }
@@ -90,6 +97,9 @@ Item {
     logEvent("idle-cycle-start", "screensaver=" + root.screensaverTimeoutSeconds + " lock=" + root.lockTimeoutSeconds)
     root.idledThisCycle = true
     root.screensaverStartedThisCycle = false
+    // A late close from a previous cycle must not catch this cycle's screensaver.
+    root.closeLateScreensaverWindows = false
+    lateScreensaverWindowTimer.stop()
     resetScreensaverWindows()
 
     if (root.screensaverDelaySeconds === 0) launchScreensaver()
@@ -106,15 +116,35 @@ Item {
     screensaverLaunchGraceTimer.stop()
 
     // The screensaver is a separate terminal process, so cancelling the cycle
-    // does not close it on its own. Close it here, or it stays up until the
-    // next keypress even though nothing is left to lock the session.
-    if (root.screensaverStartedThisCycle) runProcess(screensaverCloseProcess, "screensaver-close", "pkill -f '[o]rg.omarchy.screensaver' || true")
+    // does not close it on its own. Close the windows this cycle opened, and
+    // close any that are still on their way if the launch has begun.
+    if (root.screensaverStartedThisCycle) {
+      root.closeLateScreensaverWindows = true
+      lateScreensaverWindowTimer.restart()
+    }
+    closeScreensaverWindows(IdleModel.addressesToClose(root.ownedScreensaverWindows))
+    root.ownedScreensaverWindows = ({})
 
     if (root.idledThisCycle) runProcess(wakeProcess, "wake", "omarchy-system-wake")
 
     root.idledThisCycle = false
     root.screensaverStartedThisCycle = false
     resetScreensaverWindows()
+  }
+
+  function closeScreensaverWindows(addresses) {
+    if (addresses.length === 0) return
+    root.pendingScreensaverCloses = root.pendingScreensaverCloses.concat(addresses)
+    runNextScreensaverClose()
+  }
+
+  // Closes run one at a time, so a close requested while another is running is
+  // queued instead of being skipped by runProcess.
+  function runNextScreensaverClose() {
+    if (screensaverCloseProcess.running || root.pendingScreensaverCloses.length === 0) return
+    var batch = root.pendingScreensaverCloses
+    root.pendingScreensaverCloses = []
+    runProcess(screensaverCloseProcess, "screensaver-close", IdleModel.closeWindowsCommand(batch))
   }
 
   function resetScreensaverWindows() {
@@ -131,10 +161,20 @@ Item {
   function handleScreensaverWindowOpened(address) {
     setScreensaverWindow(address, true)
     screensaverLaunchGraceTimer.stop()
+
+    if (root.closeLateScreensaverWindows) {
+      root.ownedScreensaverWindows = IdleModel.ownedWindowsAfterClose(root.ownedScreensaverWindows, address)
+      closeScreensaverWindows([IdleModel.normalizeWindowAddress(address)])
+      return
+    }
+
+    var ownsWindow = root.idledThisCycle && root.screensaverStartedThisCycle
+    root.ownedScreensaverWindows = IdleModel.ownedWindowsAfterOpen(root.ownedScreensaverWindows, address, ownsWindow)
   }
 
   function handleScreensaverWindowClosed(address) {
     setScreensaverWindow(address, false)
+    root.ownedScreensaverWindows = IdleModel.ownedWindowsAfterClose(root.ownedScreensaverWindows, address)
 
     if (!root.idleEnabled || !root.idledThisCycle || !root.screensaverStartedThisCycle) return
     if (root.screensaverWindowCount > 0) return
@@ -276,6 +316,19 @@ Item {
     onTriggered: if (root.idleEnabled && root.idledThisCycle) root.lockSystem("lock-timeout")
   }
 
+  // The launcher waits for its windows before it exits, so a window can arrive
+  // up to a few seconds after the cancel or the launcher's exit. Keep the late
+  // close armed until the launcher is done and that window has had time to map.
+  Timer {
+    id: lateScreensaverWindowTimer
+    interval: 3000
+    repeat: false
+    onTriggered: {
+      if (screensaverProcess.running) return
+      root.closeLateScreensaverWindows = false
+    }
+  }
+
   Timer {
     id: screensaverLaunchGraceTimer
     interval: 3000
@@ -294,11 +347,17 @@ Item {
 
   Process {
     id: screensaverProcess
-    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "screensaver exitCode=" + exitCode + " status=" + exitStatus) }
+    onExited: function(exitCode, exitStatus) {
+      root.logEvent("process-exit", "screensaver exitCode=" + exitCode + " status=" + exitStatus)
+      lateScreensaverWindowTimer.restart()
+    }
   }
   Process {
     id: screensaverCloseProcess
-    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "screensaver-close exitCode=" + exitCode + " status=" + exitStatus) }
+    onExited: function(exitCode, exitStatus) {
+      root.logEvent("process-exit", "screensaver-close exitCode=" + exitCode + " status=" + exitStatus)
+      root.runNextScreensaverClose()
+    }
   }
   Process {
     id: lockProcess

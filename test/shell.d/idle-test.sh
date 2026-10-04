@@ -53,9 +53,30 @@ fi
 
 pass "Stay Awake toggle persists state without reentrant shell IPC"
 
-cancel_block=$(awk '/function cancelIdleCycle/,/^  }$/' "$ROOT/shell/plugins/services/idle/Service.qml")
-if ! grep -q "pkill -f '\[o\]rg.omarchy.screensaver'" <<<"$cancel_block"; then
-  fail "cancelIdleCycle closes a launched screensaver window"
-fi
+run_node_test <<'JS'
+const idle = requireFromRoot('shell/plugins/services/idle/IdleModel.js')
 
-pass "cancelIdleCycle closes a launched screensaver window"
+assertEqual(idle.normalizeWindowAddress('59dac128e760'), '0x59dac128e760', 'idle adds the hyprctl prefix to socket addresses')
+assertEqual(idle.normalizeWindowAddress('0xABC'), '0xabc', 'idle normalizes window address case')
+assertEqual(idle.normalizeWindowAddress('bad;rm -rf'), '', 'idle rejects addresses that are not hex')
+
+// A window opened by this cycle's launch is owned; one opened outside it is not.
+let owned = idle.ownedWindowsAfterOpen({}, '59dac1', true)
+assertDeepEqual(idle.addressesToClose(owned), ['0x59dac1'], 'idle owns windows opened by the cycle launch')
+owned = idle.ownedWindowsAfterOpen({}, '0xbeef', false)
+assertDeepEqual(idle.addressesToClose(owned), [], 'idle does not own a screensaver the user started')
+
+// Closing a window that already went away removes it from ownership.
+owned = idle.ownedWindowsAfterClose({ '0x59dac1': true, '0xbeef': true }, '59dac1')
+assertDeepEqual(idle.addressesToClose(owned), ['0xbeef'], 'idle forgets windows that closed')
+
+assertEqual(
+  idle.closeWindowsCommand(['0x59dac1']),
+  'hyprctl dispatch "hl.dsp.window.close({ window = \\"address:0x59dac1\\" })" >/dev/null 2>&1',
+  'idle closes owned windows by address'
+)
+assertEqual(idle.closeWindowsCommand([]), 'true', 'idle close command is a no-op with no windows')
+assertEqual(idle.closeWindowsCommand(['nope;x']), 'true', 'idle never builds a close command from a non-hex address')
+JS
+
+pass "idle screensaver ownership and close-by-address"
