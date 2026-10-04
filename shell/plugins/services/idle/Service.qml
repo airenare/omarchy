@@ -44,6 +44,9 @@ Item {
   property bool closeLateScreensaverWindows: false
   // How many late windows the cancelled launch can still open, one per screen.
   property int lateScreensaverWindowBudget: 0
+  // Screens the current launch is opening windows for, fixed when it starts so
+  // that a monitor dropping out mid-launch does not shrink the budget.
+  property int launchScreenCount: 0
   property var pendingScreensaverCloses: []
 
   function secondsFromConfig(value, fallback) {
@@ -74,6 +77,7 @@ Item {
 
   function launchScreensaver() {
     root.screensaverStartedThisCycle = true
+    root.launchScreenCount = Quickshell.screens.length
     screensaverLaunchGraceTimer.restart()
     runProcess(screensaverProcess, "screensaver", "[[ $(omarchy-shell lock isLocked 2>/dev/null) == \"true\" ]] || omarchy-launch-screensaver")
   }
@@ -124,7 +128,7 @@ Item {
     var owned = IdleModel.addressesToClose(root.ownedScreensaverWindows)
     if (root.screensaverStartedThisCycle) {
       root.closeLateScreensaverWindows = true
-      root.lateScreensaverWindowBudget = IdleModel.lateWindowBudget(Quickshell.screens.length, owned.length)
+      root.lateScreensaverWindowBudget = IdleModel.lateWindowBudget(root.launchScreenCount, owned.length)
       lateScreensaverWindowTimer.restart()
     }
     closeScreensaverWindows(owned)
