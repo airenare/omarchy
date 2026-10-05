@@ -128,7 +128,11 @@ Item {
     var owned = IdleModel.addressesToClose(root.ownedScreensaverWindows)
     if (root.screensaverStartedThisCycle) {
       root.closeLateScreensaverWindows = true
-      root.lateScreensaverWindowBudget = IdleModel.lateWindowBudget(root.launchScreenCount, owned.length)
+      // The launch may have opened for more screens than it started with (a
+      // monitor connected mid-launch), or fewer (one dropped out), so budget
+      // against the larger of the two counts.
+      var screens = Math.max(root.launchScreenCount, Quickshell.screens.length)
+      root.lateScreensaverWindowBudget = IdleModel.lateWindowBudget(screens, owned.length)
       lateScreensaverWindowTimer.restart()
     }
     closeScreensaverWindows(owned)
